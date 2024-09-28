@@ -1,54 +1,88 @@
-# This config was automatically generated from your source code
-# Stacks detected: deps:node:.
 version: 2.1
-orbs:
-  node: circleci/node@5
-jobs:
-  test-node:
-    # Install node dependencies and run tests
-    executor: node/default
-    steps:
-      - checkout
-      - node/install-packages:
-          pkg-manager: npm
-      - run:
-          name: Run tests
-          command: npm test --passWithNoTests
-  build-node:
-    # Build node project
-    executor: node/default
-    steps:
-      - checkout
-      - node/install-packages:
-          pkg-manager: npm
-      - run:
-          command: npm run build
-      - run:
-          name: Create the ~/artifacts directory if it doesn't exist
-          command: mkdir -p ~/artifacts
-      # Copy output to artifacts dir
-      - run:
-          name: Copy artifacts
-          command: cp -R build dist public .output .next .docusaurus ~/artifacts 2>/dev/null || true
-      - store_artifacts:
-          path: ~/artifacts
-          destination: node-build
-  deploy:
-    # This is an example deploy job, not actually used by the workflow
+
+executors:
+  node-executor:
     docker:
-      - image: cimg/base:stable
+      - image: circleci/node:20
+
+jobs:
+  install:
+    executor: node-executor
     steps:
-      # Replace this with steps to deploy to users
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "package-lock.json" }}
+            - v1-dependencies-
       - run:
-          name: deploy
-          command: '#e.g. ./deploy.sh'
+          name: Install Dependencies
+          command: npm install
+      - save_cache:
+          key: v1-dependencies-{{ checksum "package-lock.json" }}
+          paths:
+            - ./node_modules
+
+  test:
+    executor: node-executor
+    steps:
+      - checkout
+      - restore_cache:
+          keys:
+            - v1-dependencies-{{ checksum "package-lock.json" }}
+            - v1-dependencies-
+      - run:
+          name: Run Tests
+          command: npm test
+      - store_test_results:
+          path: test-results
+      - store_artifacts:
+          path: test-results
+
+  build:
+    executor: node-executor
+    steps:
+      - checkout
+      - run:
+          name: Build Docker Image with Dockerfile.dev
+          command: docker build -f Dockerfile.dev -t my-app:dev .
+      - persist_to_workspace:
+          root: .
+          paths:
+            - build
+
+  # deploy:
+  #   docker:
+  #     - image: circleci/aws-cli
+  #   steps:
+  #     - checkout
+  #     - run:
+  #         name: Deploy to AWS ECS/EC2
+  #         command: |
+  #           # Ensure AWS credentials are configured (replace with your deployment setup)
+  #           aws configure set aws_access_key_id $AWS_ACCESS_KEY_ID
+  #           aws configure set aws_secret_access_key $AWS_SECRET_ACCESS_KEY
+  #           aws configure set default.region $AWS_DEFAULT_REGION
+
+  #           # Deploy to AWS ECS/EC2 using AWS CLI commands or your preferred method
+  #           # e.g., use ECS CLI, kubectl for EKS, or SSH for EC2.
+
+  #           # Example ECS command:
+  #           aws ecs update-service --cluster my-cluster --service my-service --force-new-deployment
+
+  #           # For EC2: SCP your files or restart service using SSH, etc.
+  #           echo "Deployment successful"
+
 workflows:
-  build-and-test:
+  version: 2
+  build_and_deploy:
     jobs:
-      - test-node
-      - build-node:
+      - install
+      - test:
           requires:
-            - test-node
-    # - deploy:
-    #     requires:
-    #       - build-node
+            - install
+      - build:
+          requires:
+            - test
+      # - deploy:
+      #     requires:
+      #       - build
